@@ -1,0 +1,42 @@
+【题目要求】
+
+设计一个shell脚本来备份数据库，首先在本地服务器上保存一份数据，然后再远程拷贝一份，本地保存一周的数据，远程保存一个月。
+假定，我们知道mysql root账号的密码，要备份的库为discuz，本地备份目录为/bak/mysql, 远程服务器ip为192.168.123.30，远程提供了一个rsync服务，备份的地址是 192.168.123.30::backup  . 写完脚本后，需要加入到cron中，每天凌晨3点执行。
+
+【习题分析】
+
+1. 要完成此脚本，首先要会写备份数据库的命令，命令行下如何备份，脚本中就如何备份。
+
+2. 备份完成的数据不仅要保存在本地，还要存储到远程，传输到远程又涉及到一个rsync的命令，所以还要懂得如何把本地文件传输到远程的命令。
+
+3. 本题中还有一个要求，就是要设定旧备份文件的时效。本地保留一周，远程保留一个月，要实现删除旧文件，大家可以借助find命令，找出超过指定日期的旧文件删除即可。但对于远程的文件来说，就不容易做到了。其实，还有一种方法，可以借助date命令，date +%w和date +%d分别表示周几和几号。相信，聪明的你早已经想到如何使用了吧。
+
+【习题答案】
+
+#! /bin/bash
+### backup mysql data
+### Writen by Aming.
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/mysql/bin
+d1=`data +%w`
+d2=`date +%d`
+pass="your_mysql_password"
+bakdir=/bak/mysql
+r_bakdir=192.168.123.30::backup
+exec 1>/var/log/mysqlbak.log 2>/var/log/mysqlbak.log
+echo "mysql backup begin at `date +"%F %T"`."
+mysqldump -uroot -p$pass --default-character-set=gbk discuz >$bakdir/$d1.sql
+rsync -az $bakdir/$d1.sql $r_bakdir/$d2.sql
+echo "mysql backup end at `date +”%F %T”`."
+
+【答案解析】
+
+1. 设定PATH的原因是后面的mysqldump命令并没有在PATH里
+
+2. d1变量为当天的周，d2变量为当天的日，周的范围是0-6，日的范围是1-31，本地存一周，就可以用d1作为前缀，自动循环，无论过去多少天一共就只有7个。同理，远程存一个月，用d2作为前缀，无论过去多久，始终只有31个文件。
+
+3. exec 1>/var/log/mysqlbak.log 2>/var/log/mysqlbak.log定义接下来的命令涉及到的所有正确输出和错误输出都会写入/var/log/mysqlbak.log里面。
+
+4. mysqldump备份数据库的命令不用多解释，如果不熟悉的同学请查阅mysql备份的资料。
+
+5. rsync是一个远程传输的工具，-z选项表示传输过程中压缩。

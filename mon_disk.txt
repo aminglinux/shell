@@ -1,0 +1,87 @@
+【题目要求】
+
+写一个shell脚本，检测所有磁盘分区使用率和inode使用率并记录到以当天日期为命名的日志文件里，当发现某个分区容量或者inode使用量大于85%时，发邮件通知你自己。
+
+【习题分析】
+
+1 查看磁盘空间使用情况的命令是df -h，查看磁盘inode使用情况的命令是df -i
+
+2 要想写好此脚本，首先需要运行df -h命令，看看输出内容，定位使用率的数字在什么位置。通过查看输出信息，得出结论第五列为可用百分比，df -i输出结果也是类似的。
+
+3 当天日期用date +%F表示
+
+【习题答案】
+
+#!/bin/bash
+LANG=en
+log=/tmp/disk/`date +%F`.log
+mail=123@123.com
+mail_f=/usr/local/sbin/mail.py
+tag1=0
+tag2=0
+[ -d /tmp/disk ] || mkdir /tmp/disk
+date +"%F-%T" >>$log
+df -h >> $log
+df -i >> $log
+for i in `df -h|grep -v 'Use'|awk -F ' +|%' '{print $5}'`
+do
+    if [ $i -gt 85 ]; then
+        tag1=1
+    fi
+done
+for i in `df -i|grep -v 'IUse'|awk -F ' +|%' '{print $5}'`
+do
+    if [ $i -gt 85 ]; then
+    if [ $tag -eq 1 ]
+    then
+        tag2=1
+    fi
+    fi
+done
+if [ $tag1 -eq 0 ]
+then
+    if [ $tag2 -eq 0 ]
+    then
+        tag=0
+    else
+        tag=2
+    fi
+fi
+if [ $tag1 -eq 1 ]
+then
+    if [ $tag2 -eq 0 ]
+    then
+        tag=1
+    else
+        tag=3
+    fi
+fi
+case $tag in
+1)
+    python $mail_f $mail "Disk space is not enough." "`df -h`"
+    ;;
+2)
+    python $mail_f $mail "Disk inode is not enough." "`df -i`"
+    ;;
+3)
+    python $mail_f $mail "Disk space and inode is not enough." "`df -h; df-i`"
+    ;;
+0)
+    echo "do nothing."
+    ;;
+esac
+
+【答案解析】
+
+1. 脚本中首先定义LANG为en，这样df命令输出内容全部为英文，如果是中文则会产生bug。
+
+2. 本题中需要检查两个指标，所以要分情况考虑，主要是下面几种情况：
+1）磁盘空间使用有问题，inode使用没问题，tag=1
+2）磁盘空间使用没问题，inode使用有问题，tag=2
+3）都没有问题，tag=0
+4）都有问题，tag=3
+以上四种情况，由tag的值不同而决定是哪种情况。
+
+3. 在前面已经介绍过，awk的-F选项指定的分隔符可以指定多个，使用管道符切割，本例中分隔符是空白符号，所以使用了' +'来表示，其中'+'在正则中表示一个或多个'+'前面的字符。
+
+4 case架构中，可以省略最后面的*)。

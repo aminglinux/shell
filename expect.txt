@@ -1,0 +1,161 @@
+1. 自动远程登录
+
+#! /usr/bin/expect
+#定义变量host和passwd
+set host "192.168.11.102"
+set passwd "123456"
+#登录远程机器，要使用spawn命令
+spawn ssh  root@$host
+#以下为expect交互部分，当输出yes/no的时候，脚本会自动提供yes，\r为回车的意思，exp_continue的作用是继续执行{ }内下面的语句，如果不加，下面的就不会生效了。
+expect {
+"yes/no" { send "yes\r"; exp_continue}
+"assword:" { send "$passwd\r" }
+}
+#interact的作用是，登录完远程机器后，不要退出来，一直保持登录状态，如果不加这句，登录完后马上会退出。
+interact
+
+2. 远程登录后执行命令
+
+#!/usr/bin/expect
+set user "root"
+set passwd "123456"
+spawn ssh $user@192.168.11.18
+expect {
+"yes/no" { send "yes\r"; exp_continue}
+"password:" { send "$passwd\r" }
+}
+#这里的*为通配符号，比如']#'或者']$'都匹配，它的意思是当遇到']*'时，发送下面的指令。
+expect "]*"
+send "touch /tmp/12.txt\r"
+expect "]*"
+send "echo 1212 > /tmp/12.txt\r"
+expect "]*"
+send "exit\r"
+#增加expect eof的目的是，保证脚本中所有的指令都能执行完成。它相当于是一个结尾符。
+expect eof
+
+
+3. 给expect脚本增加参数
+
+#!/usr/bin/expect
+#定义第一个参数，类似于shell的$1
+set user [lindex $argv 0]
+#定义第二个参数，类似于shell的$2
+set host [lindex $argv 1]
+set passwd "123456"
+#定义第三个参数，类似于shell的$3
+set cm [lindex $argv 2]
+spawn ssh $user@$host
+expect {
+"yes/no" { send "yes\r"}
+"password:" { send "$passwd\r" }
+}
+expect "]*"
+send "$cm\r"
+expect "]*"
+send "exit\r"
+
+此时执行脚本时，需要带上参数，比如脚本名字为test.expect，用户为root，ip为192.168.11.18，执行的命令为w，则最终执行该脚本时应该这样写：
+
+[root@aminglinux ~]# ./test.expect root 192.168.11.18 w
+
+4. 自动同步文件
+
+#!/usr/bin/expect
+set passwd "123456"
+#spawn后面的命令不是ssh，而是rsync
+spawn rsync -av root@192.168.11.18:/tmp/12.txt /tmp/
+expect {
+"yes/no" { send "yes\r"}
+"password:" { send "$passwd\r" }
+}
+#如果不加expect eof，则rsync命令不会正常执行完成的。
+expect eof
+
+5. 构建文件发布系统
+
+【需求背景】
+
+对于大公司而言，肯定时不时会有网站或者配置文件更新，而且使用的机器肯定也是好多台，少则几台，多则几十甚至上百台。所以，自动同步文件是至关重要的。
+
+【实现思路】
+
+首先要有一台模板机器，把要分发的文件准备好，然后只要使用expect脚本批量把需要同步的文件分发到目标机器即可，并且要支持批量执行命令。
+
+【核心命令】
+
+rsync -av --files-from=list.txt  /  root@host:/
+
+说明：rsync有一个--files-from的选项，用它定一个文件，该文件内容为要同步的所有文件路径的列表。list.txt文件内容如下：
+/data/wwwroot/data/aaa.php
+/data/wwwroot/abc/123.js
+....
+
+【发布系统的实现】
+
+1）定义ip列表文件，即将要发布的目标主机列表，假设文件名为ip.list，内容如下：
+
+192.168.11.18
+192.168.11.19
+......
+
+2）定义发布shell脚本，内容如下：
+
+#!/bin/bash
+##定义发布用的expect脚本，如果已经存在需要先删除
+[ -f ./rsync.expect ] && rm -f ./rsync.expect
+
+##以下操作会将这部分代码写入./rsync.expect文件里
+cat > ./rsync.expect <<EOF
+#!/usr/bin/expect
+set passwd "123456"
+set host [lindex $argv 0]
+set file [lindex $argv 1]
+spawn rsync -av --files-from=$file / root@$host:/
+expect {
+"yes/no" { send "yes\r"}
+"password:" { send "$passwd\r" }
+}
+expect eof
+EOF
+
+#给rsync.expect脚本执行权限
+chmod a+x ./rsync.expect
+
+for ip in `cat ip.list`
+do
+    #list.txt内容为要同步的所有文件列表
+    ./rsync.expect $ip list.txt
+done
+
+3）定义命令批量执行脚本，内容如下：
+
+#!/bin/bash
+##定义批量执行命令的expect脚本
+[ -f ./exe.expect ] && rm -f ./exe.expect
+
+cat >./exe.expect <<EOF
+#!/usr/bin/expect
+set host [lindex $argv 0]
+set passwd "123456"
+set cm [lindex $argv 1]
+
+spawn ssh root@$host
+
+expect {
+"yes/no" { send "yes\r"}
+"password:" { send "$passwd\r" }
+}
+expect "]*"
+send "$cm\r"
+expect "]*"
+send "exit\r"
+expect eof
+EOF
+
+for ip in `cat ip.list`
+do
+    echo $ip
+    ##当要执行的命令为多条或者有参数时，需要用双引号引起来，命令直接用分号作为分隔符。
+    ./exe.expect $ip "w;free -m;ls /tmp"
+done

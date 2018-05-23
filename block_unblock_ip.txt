@@ -1,0 +1,69 @@
+【题目要求】
+
+需求： 根据web服务器上的访问日志，把一些请求量非常高的ip给拒绝掉！并且每隔半小时把不再发起请求或者请求量很小的ip给解封。
+
+假设： 
+1. 一分钟内请求量高于100次的IP视为不正常请求。
+2. 访问日志路径为/data/logs/access_log。
+
+参考日志文件片段：
+157.55.39.107 [20/Mar/2015:00:01:24 +0800] www.aminglinux.com "/bbs/thread-5622-3-1.html" 200 "-" "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)";
+61.240.150.37 [20/Mar/2015:00:01:34 +0800] www.aminglinux.com "/bbs/search.php?mod=forum&srchtxt=LNMP&formhash=8f0c7da9&searchsubmit=true&source=hotsearch" 200 "-" "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)";
+
+【习题分析】
+
+1. 本脚本的难点在于，不仅要找到哪些IP请求量不合法，并且还要每隔一段时间把之前封掉的ip（若不再继续请求了）给解封。 
+
+2. 通过分析一分钟内的日志，找到访问量最大的IP，然后判断这些IP的请求量是否高于100，高于100则使用iptabls封掉，这个很容易实现。
+
+3. 每隔半小时，可以借助date +%M获取当前时间的分钟是否是00或者30来判定。
+
+4. 判断被封IP半小时内请求量为多少，可以通过iptables -nvL命令查看第一列pkts的数量（数据包）来决定，半小时内数据包低于10个，说明这个IP的请求已经正常，可以解封了。 
+
+5. 还有一个关键点，每半小时除了解封IP外，还需要把iptables的计数器清零，使用命令iptables -Z就可以做到，这样才可以统计半小时内的pkts数量。
+
+6. 每半小时，必须要先解再封，因为刚刚封掉的IP计数器肯定为0或者很小，如果先封再解则会把刚封的IP直接解封。
+
+【习题答案】
+
+#! /bin/bash
+logfile=/data/logs/access.log
+d1=`date -d "-1 minute" +%H:%M`
+d2=`date +%M`
+ipt=/sbin/iptables
+ips=/tmp/ips.txt
+block(){
+    grep "$d1:" $logfile|awk '{print $1}' |sort -n |uniq -c |sort -n >$ips
+    for ip in `awk '$1>100 {print $2}' $ips`; do
+        $ipt -I INPUT -p tcp --dport 80 -s $ip -j REJECT
+        echo "`date +%F-%T` $ip" >> /tmp/badip.txt
+    done
+}
+unblock(){
+    for i in `$ipt -nvL INPUT --line-numbers |grep '0.0.0.0/0'|awk '$2<10 {print $1}'|sort -nr`; do
+        $ipt -D INPUT $i
+    done
+    $ipt -Z
+}
+if [ $d2 == "00" ] || [ $d2 == "30" ]; then
+    unblock
+    block
+else
+    block
+fi
+
+【答案解析】
+
+1. 本例中设定两个函数，结构清晰明了，一个封IP函数一个解封IP函数。
+
+2. 通过分析访问日志，上一分钟的部分可以用关键词"date -d "-1 minute" +%H:%M"来匹配。
+
+3. 过滤出这部分日志后，用awk截取出IP，然后对IP排序、统计重复次数，然后再按出现次数多少排序，最终存储到一个临时文件里。用for循环对重复次数大于100次的IP进行遍历，依次用iptables封掉。
+
+4. 脚本一分钟执行一次，所以需要加入到cron中，每次执行时都有判断一下当前时间是否是整点或者半点，如果是则执行解封IP函数，解封完还要执行封IP的函数，否则只需要执行封IP的函数。 
+
+5. iptalbes -nvL INPUT --line-numbers可以给iptables INPUT链里的规则带上编号，要想删除哪条规则，可以直接指定编号即可，非常方便。
+
+6. $ipt -nvL INPUT --line-numbers |grep '0.0.0.0/0'|awk '$2<10 {print $1}'|sort -nr，这条命令最后面之所以要反序，是因为对于iptables的规则编号，一旦删除一条编号就会减少，不妨举个例子：
+规则一共有10条，现在删除了第6条，则规则总数变为9，原来编号为10的规则现在编号为9，原来编号为9的规则现在编号为8，依此类推，而编号为5的规则依然为5这个没有影响。有了这个规则，如果我们倒着删除规则，那前面的规则编号就不会受影响，比如一共有16条规则，我删除第16条，原来的第14条规则编号依然是14。
+

@@ -1,0 +1,71 @@
+在服务器上，写一个监控脚本，要求如下：
+
+1. 每隔10s去检测一次服务器上的httpd进程数，如果大于等于500的时候，就需要自动重启一下apache服务，并检测启动是否成功？
+
+2. 若没有正常启动还需再一次启动，最大不成功数超过5次则需要理解发邮件通知管理员，并且以后不需要再检测！
+
+3. 如果启动成功后，1分钟后再次检测httpd进程数，若正常则重复之前操作（每隔10s检测一次），若还是大于等于500，那放弃重启并需要发邮件给管理员，然后自动退出该脚本。假设其中发邮件脚本为之前咱们使用的mail.py
+
+【习题分析】
+
+1. 每隔10s检测一次，只能用死循环实现，while :即可。
+
+2. 检查httpd进程数使用命令pgrep -l httpd|wc -l。
+
+3. 重启apache服务的命令假设为/usr/local/apache2/bin/apachectl restart。
+
+4. 检测apache服务是否启动成功，可以统计httpd进程数也可以查看echo $?的值是否是0。
+
+5. 启动成功还好，如果不成功，则需要有一个计数器来统计，超过5次需要发邮件通知管理员，难点在于如何计数。
+
+【习题答案】
+
+#!/bin/bash
+check_service()
+{
+    n=0
+    for i in `seq 1 5`
+    do
+        /usr/local/apache2/bin/apachectl restart 2>/tmp/apache.err
+        if [ $? -ne 0 ]
+        then
+            n=$[$n+1]
+        else
+            break
+        fi
+    done
+    if [ $n -eq 5 ]
+    then
+        ##下面的mail.py参考https://coding.net/u/aminglinux/p/aminglinux-book/git/blob/master/D22Z/mail.py
+        python mai.py "123@qq.com" "httpd service down" `cat /tmp/apache.err`
+        exit
+    fi
+}   
+while true
+do
+    t_n=`ps -C httpd --no-heading |wc -l`
+    if [ $t_n -ge 500 ]
+    then
+        /usr/local/apache2/bin/apachectl restart
+        if [ $? -ne 0 ]
+        then
+            check_service
+        fi
+        sleep 60
+        t_n=`ps -C httpd --no-heading |wc -l`
+        if [ $t_n -ge 500 ]
+        then
+            python mai.py "123@qq.com" "httpd service somth wrong" "the httpd process is budy."
+            exit
+        fi
+    fi
+    sleep 10
+done
+
+【答案解析】
+
+1. check_service为自定义函数，它的作用是统计apache服务重启不成功的次数超过5次则给管理员发邮件。n是一个计数器，初始值为0，循环5次，只要不成功n的值就会加1，如果5次都不成功，则n的值为5。最终会给管理员邮箱发邮件，且直接退出整个脚本（exit命令的作用）。在5次循环中，哪怕有一次是成功的，则跳出for循环（break命令的作用）。
+
+2. 统计进程个数除了使用pgrep -l httpd之外，还有一种方法就是ps -C httpd --no-heading。
+
+3. 第一次重启成功或者5次循环中有一次成功，则脚本会运行sleep 60，也就是休眠60s，之后再次检测httpd进程数是否大于等于500，如果是再发邮件，并退出脚本。否则sleep 10，然后继续之前的操作。
