@@ -1,0 +1,123 @@
+【题目要求】
+
+提示用户输入网卡的名字，然后我们用脚本输出网卡的ip，需要考虑下面问题：
+
+1. 输入的字符不符合网卡名字规范，怎么应对。
+
+2. 名字符合规范，但是根本就没有这个网卡有怎么应对。
+
+3. 输入的网卡下面有多个IP地址怎么处理。
+
+【习题分析】
+
+1 可以把本机的所有网卡名字列出来，来引导用户输入。
+
+2 使用命令ip addr可以列出所有网卡信息。
+
+3 可以设计一个函数，把网卡名字作为参数，函数返回该网卡的ip。
+
+4 在获取某个网卡IP的时候，要考虑到这个网卡可能有多个IP地址。
+
+【习题答案】
+
+#!/bin/bash
+ip addr |egrep '^[1-9]+:' |awk -F ':' '{print $1,$2}' > /tmp/if_list.txt
+
+while true
+do
+     read -p "请输入网卡名(本机网卡有`cat /tmp/if_list.txt|awk '{print $2}'|xargs |sed 's/ /,/g'`): " e
+     if [ -n "$e" ]
+     then
+    if grep -qw "$e" /tmp/if_list.txt
+        then
+            break
+        else
+        echo "输入的网卡名字不对。"
+            continue
+    fi   
+     else
+        echo "你没有输入任何东西"
+        continue
+     fi
+done
+
+getip() {
+    n1=`grep -w "$1" /tmp/if_list.txt|awk '{print $1}'`
+    n2=$[$n1+1]
+    line1=`ip addr |grep -wn "$1:"|awk -F ':' '{print $1}'`
+    line2=`ip addr |grep -n "^$n2:"|awk -F ':' '{print $1}'`
+    if [ -z "$line2" ]
+    then
+        ip addr |sed -n "$line1,$"p|grep 'inet '|awk -F ' +|/' '{print $3}'
+    else
+        ip addr |sed -n "$line1,$line2"p|grep 'inet '|awk -F ' +|/' '{print $3}'
+    fi
+}
+
+myip=`getip $e`
+if [ -z "$myip" ]
+then
+    echo "网卡$e没有设置IP地址。"
+else
+    echo "网卡$e,IP地址是: "
+    echo "$myip"
+fi
+
+【答案解析】
+
+1 本题中用到多次grep、sed以及awk，有一个技巧，那就是需要在编写脚本时反复运行和推敲命令，每一次管道之前都需要先在屏幕上显示结果，然后分析下一步该如何执行。
+
+2 脚本第二行的目的是把系统所有网卡编号和名字（包括lo）存到一个临时文件里。
+
+3 做死循环的目的是，当用户输入网卡名字不正确或者没有输入字符时，应该让其继续输入，直到输入正确为止。
+
+4 在while循环脚本中同时出现了continue和break，输入网卡名字正确就执行break退出while循环，输入不正确就执行continue，继续再一次循环。
+
+5 getip函数的作用是，把网卡名字作为第一个参数，然后可以返回该网卡的IP地址。
+
+6 本例中有一个难点，当网卡有多个IP地址时，比较麻烦。大家在使用ip addr命令查看IP时，会看到IP地址所在的行中包含关键字'inet'，所以只要把该网卡下面的输出内容中包含'inet'的行过滤出来再进行截取即可。但关键是如何把指定网卡下面的那部分输出内容截出来。在这里我给大家提供一个复杂的输出内容作为实验对象。内容如下：
+
+# ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 16436 qdisc noqueue state UNKNOWN
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+    inet6 ::1/128 scope host
+       valid_lft forever preferred_lft forever
+2: em1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP qlen 1000
+    link/ether b1:83:fe:df:ac:7b brd ff:ff:ff:ff:ff:ff
+    inet6 fe82::b283:feff:fedf:ac7b/64 scope link
+       valid_lft forever preferred_lft forever
+3: em2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP qlen 1000
+    link/ether b0:83:fe:df:ad:7c brd ff:ff:ff:ff:ff:ff
+    inet 65.120.157.77/27 brd 65.120.157.95 scope global em2
+    inet 61.153.110.14/27 brd 61.153.110.16 scope global em2:1
+    inet6 fe82::b283:feff:fedf:ad7b/64 scope link
+       valid_lft forever preferred_lft forever
+4: em3: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN qlen 1000
+    link/ether b0:83:fe:df:ad:7d brd ff:ff:ff:ff:ff:ff
+5: em4: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN qlen 1000
+    link/ether b0:83:fe:df:ad:7e brd ff:ff:ff:ff:ff:ff
+6: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN
+    link/ether b0:83:fe:df:ad:7b brd ff:ff:ff:ff:ff:ff
+    inet 192.168.15.3/24 brd 192.168.15.255 scope global br0
+    inet6 fe80::b283:feff:fedf:ad7b/64 scope link
+       valid_lft forever preferred_lft forever
+7: virbr0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN
+    link/ether 52:54:00:0b:08:51 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.122.1/24 brd 192.168.122.255 scope global virbr0
+8: virbr0-nic: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN qlen 500
+    link/ether 52:54:00:0b:08:51 brd ff:ff:ff:ff:ff:ff
+9: docker0: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN
+    link/ether f6:e0:ef:a6:ba:84 brd ff:ff:ff:ff:ff:ff
+    inet 172.17.42.1/16 scope global docker0
+
+7 如上内容，要想获取em2网卡的IP地址有点困难，最好的解决办法是把如下这段截取出来：
+
+3: em2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP qlen 1000
+    link/ether b0:83:fe:df:ad:7c brd ff:ff:ff:ff:ff:ff
+    inet 65.120.157.77/27 brd 65.120.157.95 scope global em2
+    inet 61.153.110.14/27 brd 61.153.110.16 scope global em2:1
+    inet6 fe82::b283:feff:fedf:ad7b/64 scope link
+       valid_lft forever preferred_lft forever
+
+本脚本答案中，思路是，首先获取'3:em2'所在的行号，然后再获取'4:'所在的行号，然后把这中间的内容打印出来即可。但要考虑一种情况，如果用户输入的网卡名字为docker0，那么参数line2的值为空。此时要处理的文本是从"9:docker0"开头，一直到所有文本结束。
