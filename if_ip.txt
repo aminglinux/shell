@@ -42,6 +42,7 @@ do
 done
 
 getip() {
+    ## 以下方法可以锻炼逻辑思维能力，如果为了脚本更加简单，大家可以使用命令"ip addr show dev em1"
     n1=`grep -w "$1" /tmp/if_list.txt|awk '{print $1}'`
     n2=$[$n1+1]
     line1=`ip addr |grep -wn "$1:"|awk -F ':' '{print $1}'`
